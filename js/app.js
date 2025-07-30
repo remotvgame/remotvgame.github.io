@@ -1,48 +1,73 @@
 // DOM Elements
 const channelsContainer = document.getElementById('channelsContainer');
-const playerContainer = document.getElementById('playerContainer');
-const videoPlayer = document.getElementById('videoPlayer');
+const popupPlayer = document.getElementById('popupPlayer');
+const hlsPlayer = document.getElementById('hlsPlayer');
 const channelNameElement = document.getElementById('channelName');
 const serverOptions = document.getElementById('serverOptions');
-const closePlayer = document.getElementById('closePlayer');
+const closePopup = document.getElementById('closePopup');
 const searchInput = document.getElementById('searchInput');
 const searchBtn = document.getElementById('searchBtn');
 const categoryLinks = document.querySelectorAll('nav a');
+const playerMessage = document.getElementById('playerMessage');
 
 // Global variables
 let currentChannel = null;
 let allChannels = [];
+let hls = null;
+
+// Initialize HLS.js if available
+function initHls() {
+    if (Hls.isSupported()) {
+        hls = new Hls();
+        hls.on(Hls.Events.ERROR, function(event, data) {
+            if (data.fatal) {
+                showPlayerMessage('حدث خطأ في تشغيل البث. جرب سيرفرًا آخر.');
+            }
+        });
+    }
+}
 
 // Fetch channels from Firebase
 function fetchChannels() {
+    showLoading(true);
     database.ref('/').once('value')
         .then((snapshot) => {
             const data = snapshot.val();
             allChannels = [];
             
             // Extract channels from each category
-            const categories = ['ent', 'news', 'sport', 'sport+', 'islamic', 'kids'];
+            const categories = ['sport', 'sport+', 'ent', 'news', 'islamic', 'kids'];
             categories.forEach(category => {
                 if (data[category]) {
                     Object.keys(data[category]).forEach(channelKey => {
                         const channel = data[category][channelKey];
-                        channel.id = channelKey;
-                        channel.category = category;
-                        allChannels.push(channel);
+                        if (channel['name ar'] && channel['name en']) { // Filter valid channels
+                            channel.id = channelKey;
+                            channel.category = category;
+                            allChannels.push(channel);
+                        }
                     });
                 }
             });
             
             displayChannels(allChannels);
+            showLoading(false);
         })
         .catch((error) => {
             console.error('Error fetching channels:', error);
+            showLoading(false);
+            showMessage('حدث خطأ في تحميل القنوات. يرجى المحاولة لاحقًا.');
         });
 }
 
 // Display channels in the UI
 function displayChannels(channels) {
     channelsContainer.innerHTML = '';
+    
+    if (channels.length === 0) {
+        channelsContainer.innerHTML = '<div class="no-channels">لا توجد قنوات متاحة في هذا القسم</div>';
+        return;
+    }
     
     channels.forEach(channel => {
         const channelCard = document.createElement('div');
@@ -51,7 +76,10 @@ function displayChannels(channels) {
         channelCard.dataset.category = channel.category;
         
         channelCard.innerHTML = `
-            <img src="${channel.logolink}" alt="${channel['name ar']}" class="channel-img" onerror="this.src='https://via.placeholder.com/180x120?text=No+Image'">
+            <img src="${channel.logolink || 'https://via.placeholder.com/180x120?text=No+Image'}" 
+                 alt="${channel['name ar']}" 
+                 class="channel-img"
+                 onerror="this.src='https://via.placeholder.com/180x120?text=No+Image'">
             <div class="channel-info">
                 <h3>${channel['name ar']}</h3>
                 <p>${channel['name en']}</p>
@@ -67,12 +95,13 @@ function displayChannels(channels) {
 function openChannelPlayer(channel) {
     currentChannel = channel;
     channelNameElement.textContent = channel['name ar'];
+    playerMessage.textContent = '';
     
     // Clear previous content
-    videoPlayer.innerHTML = '';
     serverOptions.innerHTML = '';
     
     // Create server options
+    let hasValidServers = false;
     for (let i = 1; i <= 5; i++) {
         if (channel[`link${i}`] && channel[`link${i}`].trim() !== '') {
             const serverBtn = document.createElement('button');
@@ -89,73 +118,121 @@ function openChannelPlayer(channel) {
             });
             
             serverOptions.appendChild(serverBtn);
+            hasValidServers = true;
         }
     }
     
-    // Play the first available server by default
-    if (serverOptions.children.length > 0) {
-        playChannel(1);
+    if (!hasValidServers) {
+        showPlayerMessage('لا توجد سيرفرات متاحة لهذه القناة');
     }
     
-    playerContainer.style.display = 'flex';
+    // Show the popup and play the first available server
+    popupPlayer.style.display = 'flex';
+    if (hasValidServers) {
+        playChannel(1);
+    }
 }
 
 // Play channel stream
 function playChannel(serverIndex) {
-    videoPlayer.innerHTML = '';
+    // Reset player
+    resetPlayer();
+    playerMessage.textContent = 'جاري تحميل البث...';
     
     const link = currentChannel[`link${serverIndex}`];
-    if (!link) return;
+    if (!link) {
+        showPlayerMessage('رابط البث غير متوفر');
+        return;
+    }
     
     // Check if it's a YouTube link
-    if (link.includes('youtube.com') || link.includes('youtu.be')) {
-        const videoId = extractYouTubeId(link);
-        if (videoId) {
-            const iframe = document.createElement('iframe');
-            iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-            iframe.setAttribute('frameborder', '0');
-            iframe.setAttribute('allowfullscreen', '');
-            iframe.setAttribute('allow', 'autoplay');
-            iframe.style.width = '100%';
-            iframe.style.height = '100%';
-            videoPlayer.appendChild(iframe);
-            return;
-        }
+    if (isYouTubeLink(link)) {
+        playYouTube(link);
+        return;
     }
     
     // Check if it's an HTML page (like match schedule)
-    if (link.trim().startsWith('<!DOCTYPE html>')) {
-        const iframe = document.createElement('iframe');
-        iframe.srcdoc = link;
-        iframe.style.width = '100%';
-        iframe.style.height = '100%';
-        videoPlayer.appendChild(iframe);
+    if (isHtmlContent(link)) {
+        playHtmlContent(link);
         return;
     }
     
     // For M3U8 or other streams
+    playHlsStream(link);
+}
+
+// Play YouTube video
+function playYouTube(url) {
+    const videoId = extractYouTubeId(url);
+    if (!videoId) {
+        showPlayerMessage('رابط اليوتيوب غير صالح');
+        return;
+    }
+    
+    const iframe = document.createElement('iframe');
+    iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+    iframe.setAttribute('frameborder', '0');
+    iframe.setAttribute('allowfullscreen', '');
+    iframe.setAttribute('allow', 'autoplay; encrypted-media');
+    iframe.style.width = '100%';
+    iframe.style.height = '100%';
+    
+    hlsPlayer.parentNode.appendChild(iframe);
+    playerMessage.textContent = '';
+}
+
+// Play HTML content
+function playHtmlContent(html) {
+    const iframe = document.createElement('iframe');
+    iframe.srcdoc = html;
+    iframe.style.width = '100%';
+    iframe.style.height = '100%';
+    
+    hlsPlayer.parentNode.appendChild(iframe);
+    playerMessage.textContent = '';
+}
+
+// Play HLS stream
+function playHlsStream(url) {
     if (Hls.isSupported()) {
-        const hls = new Hls();
-        hls.loadSource(link);
-        hls.attachMedia(video);
+        hls.loadSource(url);
+        hls.attachMedia(hlsPlayer);
         hls.on(Hls.Events.MANIFEST_PARSED, function() {
-            video.play();
+            hlsPlayer.play().catch(e => {
+                showPlayerMessage('لا يمكن تشغيل البث تلقائيًا. يرجى الضغط على زر التشغيل.');
+            });
+            playerMessage.textContent = '';
         });
-        
-        const video = document.createElement('video');
-        video.controls = true;
-        video.style.width = '100%';
-        video.style.height = '100%';
-        videoPlayer.appendChild(video);
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    } else if (hlsPlayer.canPlayType('application/vnd.apple.mpegurl')) {
         // For Safari
-        video.src = link;
-        video.addEventListener('loadedmetadata', function() {
-            video.play();
+        hlsPlayer.src = url;
+        hlsPlayer.addEventListener('loadedmetadata', function() {
+            hlsPlayer.play().catch(e => {
+                showPlayerMessage('لا يمكن تشغيل البث تلقائيًا. يرجى الضغط على زر التشغيل.');
+            });
+            playerMessage.textContent = '';
         });
     } else {
-        videoPlayer.innerHTML = '<p>عذرًا، المتصفح لا يدعم تشغيل هذا النوع من البث.</p>';
+        showPlayerMessage('المتصفح لا يدعم تشغيل هذا النوع من البث');
     }
+}
+
+// Reset player
+function resetPlayer() {
+    // Destroy previous HLS instance
+    if (hls) {
+        hls.destroy();
+    }
+    
+    // Remove any iframes
+    const iframe = hlsPlayer.parentNode.querySelector('iframe');
+    if (iframe) {
+        iframe.remove();
+    }
+    
+    // Reset video element
+    hlsPlayer.src = '';
+    hlsPlayer.removeAttribute('src');
 }
 
 // Extract YouTube ID from URL
@@ -165,18 +242,35 @@ function extractYouTubeId(url) {
     return (match && match[2].length === 11) ? match[2] : null;
 }
 
+// Check if link is YouTube
+function isYouTubeLink(url) {
+    return url.includes('youtube.com') || url.includes('youtu.be');
+}
+
+// Check if content is HTML
+function isHtmlContent(content) {
+    return content.trim().startsWith('<!DOCTYPE html>') || 
+           content.trim().startsWith('<html') || 
+           content.includes('<body>');
+}
+
 // Filter channels by category
 function filterByCategory(category) {
-    if (category === 'all') {
-        displayChannels(allChannels);
-    } else {
-        const filtered = allChannels.filter(channel => channel.category === category);
-        displayChannels(filtered);
-    }
+    const filtered = allChannels.filter(channel => channel.category === category);
+    displayChannels(filtered);
+    
+    // Update active nav link
+    categoryLinks.forEach(link => link.classList.remove('active'));
+    document.querySelector(`nav a[data-category="${category}"]`).classList.add('active');
 }
 
 // Search channels
 function searchChannels(query) {
+    if (!query.trim()) {
+        displayChannels(allChannels);
+        return;
+    }
+    
     const filtered = allChannels.filter(channel => 
         channel['name ar'].includes(query) || 
         channel['name en'].toLowerCase().includes(query.toLowerCase())
@@ -184,9 +278,31 @@ function searchChannels(query) {
     displayChannels(filtered);
 }
 
+// Show loading state
+function showLoading(show) {
+    const loadingElement = document.querySelector('.loading');
+    if (loadingElement) {
+        loadingElement.style.display = show ? 'block' : 'none';
+    }
+}
+
+// Show message
+function showMessage(message) {
+    const messageElement = document.createElement('div');
+    messageElement.className = 'message';
+    messageElement.textContent = message;
+    channelsContainer.appendChild(messageElement);
+}
+
+// Show player message
+function showPlayerMessage(message) {
+    playerMessage.textContent = message;
+}
+
 // Event listeners
-closePlayer.addEventListener('click', () => {
-    playerContainer.style.display = 'none';
+closePopup.addEventListener('click', () => {
+    popupPlayer.style.display = 'none';
+    resetPlayer();
 });
 
 searchBtn.addEventListener('click', () => {
@@ -202,16 +318,13 @@ searchInput.addEventListener('keyup', (e) => {
 categoryLinks.forEach(link => {
     link.addEventListener('click', (e) => {
         e.preventDefault();
-        categoryLinks.forEach(l => l.classList.remove('active'));
-        link.classList.add('active');
         filterByCategory(link.dataset.category);
     });
 });
 
-// Load HLS.js if needed
-const script = document.createElement('script');
-script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
-document.head.appendChild(script);
-
 // Initialize the app
+initHls();
 fetchChannels();
+
+// Start with sport category by default
+filterByCategory('sport');

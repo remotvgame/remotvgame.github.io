@@ -83,6 +83,15 @@ nav a:hover, nav a.active {
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 1rem;
     padding: 1rem;
+    min-height: 300px;
+}
+
+.loading {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 2rem;
+    font-size: 1.2rem;
+    color: #666;
 }
 
 .channel-card {
@@ -118,7 +127,8 @@ nav a:hover, nav a.active {
     font-size: 0.9rem;
 }
 
-.player-container {
+/* نافذة المشغل المنبثقة */
+.popup-player {
     position: fixed;
     top: 0;
     left: 0;
@@ -127,51 +137,66 @@ nav a:hover, nav a.active {
     background-color: rgba(0, 0, 0, 0.9);
     z-index: 1000;
     display: none;
+    justify-content: center;
+    align-items: center;
+}
+
+.popup-content {
+    background-color: #1a1a2e;
+    border-radius: 10px;
+    width: 90%;
+    max-width: 900px;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
     flex-direction: column;
 }
 
-.player-header {
+.popup-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 1rem;
-    background-color: #1a1a2e;
+    background-color: #0f0f23;
     color: white;
 }
 
-.player-header h2 {
-    font-size: 1.5rem;
+.popup-header h2 {
+    font-size: 1.3rem;
+    margin: 0;
 }
 
-#closePlayer {
+#closePopup {
     background: none;
     border: none;
     color: white;
     font-size: 1.5rem;
     cursor: pointer;
+    padding: 0.5rem;
 }
 
-.player-wrapper {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    padding: 1rem;
+.video-container {
+    position: relative;
+    padding-bottom: 56.25%; /* نسبة 16:9 */
+    height: 0;
+    overflow: hidden;
+    background-color: #000;
 }
 
-#videoPlayer {
-    flex: 1;
-    background-color: black;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+#hlsPlayer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
 }
 
 .server-options {
     display: flex;
     gap: 0.5rem;
-    margin-top: 1rem;
+    padding: 1rem;
     overflow-x: auto;
-    padding-bottom: 0.5rem;
+    background-color: #0f0f23;
 }
 
 .server-btn {
@@ -182,10 +207,23 @@ nav a:hover, nav a.active {
     border-radius: 5px;
     cursor: pointer;
     white-space: nowrap;
+    font-size: 0.9rem;
+    transition: all 0.3s;
+}
+
+.server-btn:hover {
+    background-color: #2a2a3e;
 }
 
 .server-btn.active {
     background-color: #e94560;
+}
+
+.player-message {
+    padding: 1rem;
+    text-align: center;
+    color: white;
+    background-color: #0f0f23;
 }
 
 footer {
@@ -206,6 +244,11 @@ footer {
 .social-links a {
     color: white;
     font-size: 1.5rem;
+    transition: color 0.3s;
+}
+
+.social-links a:hover {
+    color: #e94560;
 }
 
 @media (max-width: 768px) {
@@ -220,5 +263,9 @@ footer {
     nav a {
         padding: 0.5rem;
         font-size: 0.9rem;
+    }
+    
+    .popup-content {
+        width: 95%;
     }
 }
